@@ -1,11 +1,604 @@
 ---
-title: "Advanced_R_notes"
+title: "NOTES: Advanced R"
 output: html_document
-date: "2022-09-20"
+date: "20-23/09/2022"
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(cowplot)
+library(tidyr)
+library(egg)
+library(gridExtra)
+library(plotly)
+library(bigstatsr)
+library(nycflights13)
+library(tidyverse)
 ```
 
+# Useful shortcuts
+
+* cmd + shift + c -> #
+* cmd + shift + m -> %>% 
+* cmd + option + i -> r chunk
+
+
+# Data analysis with the tidyverse
+
+## ggplot
+
+NOTE: Tidy via "melt" or "pivot_longer". 
+
+Find useful inspiration in the [R graph gallery](https://r-graph-gallery.com)
+
+The book ["R for data science"](https://r4ds.had.co.nz/index.html)
+
+### Iterate over variables and combine plots: 
+```{r}
+(var <- names(iris)[1:4])
+
+p_list <- list()
+for (i in seq_along(var)) {
+  p_list[[i]] <- ggplot(iris, coeff = 0.6) + 
+    geom_density(aes_string(var[i], fill = "Species"), alpha = 0.6)
+}
+#str(p_list, max.level = 1)
+
+cowplot::plot_grid(plotlist = p_list, ncol = 2, align = "hv",
+                   labels = LETTERS[1:4], label_size = 15)
+```
+
+With a common legend: 
+```{r}
+lapply(p_list, function(p) p + theme(legend.position = "none")) %>%
+  cowplot::plot_grid(plotlist = ., ncol = 2, align = "hv",
+                   labels = LETTERS[1:4], label_size = 15) %>%
+  cowplot::plot_grid(cowplot::get_legend(p_list[[1]]),
+                     rel_widths = c(1, 0.3))
+```
+
+```{r}
+#head(iris)
+
+iris_df = pivot_longer(iris, cols = -Species)
+p <- ggplot(iris_df) + 
+  geom_density(aes(x = value, color = Species, fill = Species), alpha = .3) + 
+  facet_wrap(~name, scales = "free", strip.position = "bottom") + theme_bw() + labs(y = "Density") +
+  theme(strip.background = element_blank(),
+        strip.placement = "outside")
+
+p 
+
+tag_facet(p)
+```
+
+### Interactive plots
+```{r}
+ggplot(iris, aes(Petal.Length, Petal.Width, 
+                   color = Species, shape = Species)) + 
+  geom_point(size = 3)
+
+ggplotly(width = 700, height = 450)
+
+```
+
+
+#### NOTE: Save plot in specific size:
+1. Zoom
+2. Re-size
+3. "Inspect element"
+4. use dimensions in ggsave()
+5. set resolution to 300 dpi 
+
+```{r}
+df <- dplyr::filter(gapminder::gapminder, year == 1992)
+
+ggplot(df) + geom_point(aes(gdpPercap, lifeExp, size = pop, color = continent)) +
+  scale_x_log10() + theme_bw() + 
+  labs(x = "Gross Domestic Product (log scale)", 
+       y = "Life Expectancy at birth (years)", 
+       size = "Population", 
+       color = "Continent",
+       title = "Gapminder for 1992") 
+```
+#### Produce a gif
+```{r}
+library(gganimate)
+library(gifski)
+library(glue)
+ggplot(gapminder::gapminder) + geom_point(aes(gdpPercap, lifeExp, size = pop, color = continent, fill = continent), shape = 21, alpha = .5) +
+  scale_x_log10() + theme_bw() + 
+  labs(x = "Gross Domestic Product (log scale)", 
+       y = "Life Expectancy at birth (years)", 
+       size = "Population", 
+       color = "Continent",
+       fill = "Continent",
+       title = 'Gapminder for {frame_time}') +
+    transition_time(year) + ease_aes("linear") 
+
+anim_save("animation.gif", animation = last_animation(), path = getwd())
+  
+```
+
+```{r}
+head(mpg)
+
+ggplot(data = mpg) + 
+  geom_point(mapping = aes(x = displ, y = hwy, color = hwy, size = displ)) + theme_bw()
+```
+
+#### Tibbles
+
+1. Will not display all rows
+2. Provides information on data type/class
+3. Keeps tibble format (not vector) when one column is accessed 
+
+```{r, echo=FALSE, results = FALSE, warning = FALSE}
+df <- data.frame(abc = 1, xyz = "a")
+df$x
+df[, "xyz"]
+df[, c("abc", "xyz")]
+
+tib <- tibble(abc = 1, xyz = "a")
+tib$x
+tib[, "xyz"]
+tib[, c("abc", "xyz")]
+
+colnames(tib)
+names(tib)
+
+var <- "abc"
+tib[var]
+
+annoying <- tibble(
+  `1` = 1:10,
+  `2` = `1` * 2 + rnorm(length(`1`))
+)
+
+annoying$'1'
+
+#tibble::enframe() # Converts vectors to data frames and vice versa
+```
+
+
+# Chapter 5: Data transformation
+
+Five key dplyr functions: 
+* filter
+* arrange
+* select (starts_with, ends_with, contains, matches, num_range)
+* mutate
+* summarise (combined with group_by) 
+
+with select(), colnames can be changed. However, all other names are dropped if "everything" is not used.  
+
+```{r, echo=FALSE, results = FALSE, warning = FALSE}
+
+### Filter exercises:
+flights
+
+# Had an arrival delay of two or more hours
+filter(flights, arr_delay >= 120)
+
+# Flew to Houston (IAH or HOU)
+filter(flights, dest %in% c("IAH", "HOU"))
+
+# Were operated by United, American, or Delta
+table(flights$carrier)
+airlines
+filter(flights, carrier %in% c("UA", "DL", "AA"))
+
+# Departed in summer (July, August, and September)
+filter(flights, month %in% 7:9)
+
+# Arrived more than two hours late, but didn’t leave late
+filter(flights, arr_delay > 120  & dep_delay <= 0 )
+
+# Were delayed by at least an hour, but made up over 30 minutes in flight
+filter(flights, dep_delay >=60 & arr_delay < 30)
+
+# Departed between midnight and 6am (inclusive)
+filter(flights, dep_time %in% c(0:600))
+
+#between() # Do values in a numeric vector fall in specified range?
+filter(flights, between(dep_time, 0, 600))
+
+filter(flights, is.na(dep_time))
+summary(flights)
+
+```
+```{r, echo=FALSE, results = FALSE, warning = FALSE}
+### Arrange exercises 
+
+# How could you use arrange() to sort all missing values to the start? (Hint: use is.na()).
+arrange(flights, desc(is.na(dep_time)))
+arrange(flights, dep_time)
+tail(.Last.value)
+arrange(flights, !is.na(dep_time), dep_time)
+
+# Sort flights to find the most delayed flights. Find the flights that left earliest.
+arrange(flights, dep_delay, dep_time != 2400, dep_time)
+
+# Sort flights to find the fastest (highest speed) flights.
+arrange(flights, desc(distance/air_time))
+
+flights %>% 
+  mutate(speed = distance/air_time) %>% 
+  arrange(desc(speed))
+
+# Which flights travelled the farthest? Which travelled the shortest?
+arrange(flights, distance)
+arrange(flights, desc(distance))
+
+```
+
+```{r, echo = FALSE, results = FALSE, warning = FALSE}
+
+### Select exercises
+
+# Brainstorm as many ways as possible to select dep_time, dep_delay, arr_time, and arr_delay from flights.
+
+select(flights, dep_time, dep_delay, arr_time, arr_delay)
+select(flights, -c(year:day, sched_dep_time, sched_arr_time, carrier:time_hour))
+select(flights, starts_with(c("dep", "arr")))
+
+# What happens if you include the name of a variable multiple times in a select() call?
+
+select(flights, dep_time, dep_time)
+
+# What does the any_of() function do? Why might it be helpful in conjunction with this vector?
+
+#any_of() #Select variables from character vectors
+vars <- c("year", "month", "day", "dep_delay", "arr_delay")
+select(flights, any_of(vars))
+
+# Does the result of running the following code surprise you? 
+# How do the select helpers deal with case by default? 
+# How can you change that default?
+
+select(flights, contains("TIME"))
+select(flights, contains("TIME", ignore.case = FALSE))
+
+```
+Use mutate() to alter or create variables. 
+Use transmute() to only keep new variables. 
+with lag()/lead() you push all values to the right/left. 
+
+```{r, echo=FALSE, results = FALSE, warning = FALSE}
+
+### Mutate exercises 
+
+# Currently dep_time and sched_dep_time are convenient to look at, but hard to compute with because they’re not really continuous numbers. Convert them to a more convenient representation of number of minutes since midnight.
+change_format = function(x) ifelse(x == 2400, 0, x %/% 100 * 60 + x %% 100)
+
+flights2 <- mutate(flights, 
+       dep_time = change_format(dep_time),
+       sched_dep_time = change_format(sched_dep_time))
+
+mutate(flights, 
+       new_dep_time = ifelse(dep_time == 2400, 0, (dep_time %/% 100 *60) + dep_time %% 100)) 
+mutate(flights, 
+       new_sched_dep_time = ifelse(sched_dep_time == 2400, 0, (sched_dep_time %/% 100 *60) + sched_dep_time %% 100)) 
+
+# Compare air_time with arr_time - dep_time. What do you expect to see? What do you see? What do you need to do to fix it?
+
+mutate(flights, 
+       exp_air_time = arr_time - dep_time,
+       dif = air_time - exp_air_time)
+
+ggplot(slice_sample(flights2, n = 50e2)) + 
+  geom_point(aes(air_time, arr_time - dep_time), alpha = .6) +
+  geom_abline(color = "red") + theme_bw()
+ 
+# Compare dep_time, sched_dep_time, and dep_delay. How would you expect those three numbers to be related?
+
+mutate(flights, 
+       exp_dep_time = dep_time - dep_delay,
+       dif = sched_dep_time - exp_dep_time)
+
+ggplot(slice_sample(flights2, n = 50e2)) + 
+  geom_point(aes(dep_delay, dep_time - sched_dep_time), alpha = .6) +
+  geom_abline(color = "red") + theme_bw()
+ 
+# Find the 10 most delayed flights using a ranking function. How do you want to handle ties? Carefully read the documentation for min_rank().
+
+min_rank(flights$dep_delay)
+filter(flights, min_rank(dep_delay) <= 10)
+flights %>% 
+  slice_min(dep_delay, n = 10) %>% 
+  slice(1:10)
+ 
+# What does 1:3 + 1:10 return? Why?
+
+1:3 + 1:10
+ 
+# What trigonometric functions does R provide?
+
+?cos
+
+```
+
+
+```{r, echo = FALSE, results = FALSE, warning = FALSE}
+delays <- flights %>% 
+  group_by(dest) %>% 
+  summarise(
+    count = n(),
+    dist = mean(distance, na.rm = TRUE),
+    delay = mean(arr_delay, na.rm = TRUE)) %>% 
+  filter(count > 20, dest != "HNL")
+
+ggplot(data = delays, mapping = aes(x = dist, y = delay)) +
+  geom_point(aes(size = count), alpha = 1/3) +
+  geom_smooth(se = FALSE)
+
+count(flights, dest) # add "wt = xx" to add weight 
+
+daily <- group_by(flights, year, month, day)
+per_day <- summarise(daily, flights = n())
+
+
+```
+
+```{r SUMMARIES, echo = FALSE, results = FALSE, warning = FALSE}
+
+### Summaries exercises 
+
+# Brainstorm at least 5 different ways to assess the typical delay characteristics of a group of flights. Consider the following scenarios:
+
+  # A flight is 15 minutes early 50% of the time, and 15 minutes late 50% of the time.
+
+flights %>% 
+  group_by(flight) %>% 
+  summarise(med_delay = median(arr_delay, na.rm = TRUE),
+            n = n()) %>% 
+  filter(med_delay <= -15)
+
+flights %>% 
+  group_by(flight) %>% 
+  summarise(prop_very_early = median(arr_delay <= -15, na.rm = TRUE),
+            n = n()) %>% 
+  filter(prop_very_early >= 0.5)
+ 
+flights %>% 
+  mutate(is_very_early = arr_delay <= -15) %>% 
+  group_by(flight) %>% 
+  summarise(prop_very_early = median(is_very_early, na.rm = TRUE),
+            n = n()) %>% 
+  filter(prop_very_early >= 0.5) %>% 
+  arrange(desc(prop_very_early))
+ 
+  # A flight is always 10 minutes late.
+
+flights %>% 
+  group_by(flight) %>% 
+  summarise(prop_late = mean(arr_delay >= 10, na.rm = TRUE),
+            n = n()) %>% 
+  filter(prop_late == 1) %>% 
+  arrange(desc(n))
+
+ 
+  # A flight is 30 minutes early 50% of the time, and 30 minutes late 50% of the time.
+
+flights %>% 
+  group_by(flight) %>% 
+  summarise(prop_late = mean(arr_delay >= 120, na.rm = TRUE),
+            n = n()) %>% 
+  filter(prop_late >= 0.8) %>% 
+  arrange(desc(n))
+ 
+  # 99% of the time a flight is on time. 1% of the time it’s 2 hours late.
+ 
+ # Which is more important: arrival delay or departure delay?
+
+
+
+# Come up with another approach that will give you the same output as not_cancelled %>% count(dest) and not_cancelled %>% count(tailnum, wt = distance) (without using count()).
+
+not_cancelled <- flights %>% 
+  filter(!is.na(dep_delay), !is.na(arr_delay))
+
+not_cancelled %>% count(dest)
+
+not_cancelled %>% 
+  group_by(dest) %>% 
+  summarise(
+    n = n()
+  )
+
+not_cancelled %>% count(tailnum, wt = distance)
+
+not_cancelled %>% 
+  group_by(tailnum) %>% 
+  summarise(
+    dist = sum(distance)
+  )
+ 
+# Our definition of cancelled flights (is.na(dep_delay) | is.na(arr_delay) ) is slightly suboptimal. Why? Which is the most important column?
+
+table(dep = is.na(flights$dep_delay),
+      arr = is.na(flights$arr_delay))
+
+not_cancelled2 <- flights %>% 
+  filter(!is.na(arr_delay))
+
+anyNA(not_cancelled2)
+
+table(complete.cases(not_cancelled2))
+
+flights %>% 
+  { filter(., complete.cases(.)) }
+ 
+# Look at the number of cancelled flights per day. Is there a pattern? Is the proportion of cancelled flights related to the average delay?
+
+flights %>% 
+  group_by(year, month, day) %>% 
+  summarise(canceled = sum(is.na(dep_delay)),
+            n = n()) %>% 
+  arrange(desc(canceled))
+  
+# Which carrier has the worst delays? Challenge: can you disentangle the effects of bad airports vs. bad carriers? Why/why not? (Hint: think about flights %>% group_by(carrier, dest) %>% summarise(n()))
+
+flights %>% 
+  group_by(year, month, day) %>% 
+  summarise(prob_canceled = mean(is.na(dep_delay)),
+            avg_delay = mean(dep_delay, na.rm = TRUE)) %>% 
+ ggplot(aes(prob_canceled, avg_delay)) + 
+  geom_point() + 
+  geom_smooth() + 
+  theme_bw() 
+
+# What does the sort argument to count() do. When might you use it?
+```
+
+```{r GROUPED MUTATES, echo = FALSE, results = FALSE, warning = FALSE}
+
+flights %>% 
+  group_by(year, month, day) %>%
+  filter(rank(desc(arr_delay)) < 10)
+
+flights %>% 
+  group_by(dest) %>% 
+  filter(n() > 365)
+
+flights %>% 
+  filter(arr_delay > 0) %>% 
+  mutate(prop_delay = arr_delay / sum(arr_delay)) %>% 
+  select(year:day, dest, arr_delay, prop_delay)
+
+flights %>% 
+  group_by(year, month, day) %>% 
+  filter(!is.na(arr_delay)) %>% 
+  mutate(prop_delay = arr_delay / sum(arr_delay)) %>% 
+  select(year:day, dest, arr_delay, prop_delay) %>% 
+  filter(month == 1, day == 1)
+
+```
+```{r, echo = FALSE, results = FALSE, warning = FALSE}
+
+### Grouped mutates exercises 
+
+# Refer back to the lists of useful mutate and filtering functions. Describe how each operation changes when you combine it with grouping.
+
+
+# Which plane (tailnum) has the worst on-time record?
+
+flights %>% 
+  group_by(tailnum) %>% 
+  filter(sum(!is.na(arr_delay)) > 0) %>% 
+  summarise(not_on_time = max(arr_delay, na.rm = TRUE),
+            n = n()) %>% 
+  arrange(desc(not_on_time)) 
+
+# What time of day should you fly if you want to avoid delays as much as possible?
+
+flights %>% 
+  group_by(sched_dep_time) %>% 
+  summarise(prob_delay = mean(arr_delay > 0, na.rm= TRUE),
+            n = n()) %>% 
+  ggplot(aes(sched_dep_time, prob_delay)) + geom_point() + geom_smooth() + theme_bw()
+
+flights %>% 
+  mutate(sched_dep_time_hour = sched_dep_time %/% 100) %>% 
+  group_by(sched_dep_time_hour) %>% 
+  summarise(prob_delay = mean(arr_delay > 0, na.rm= TRUE),
+            n = n()) %>% 
+  ggplot(aes(sched_dep_time_hour, prob_delay)) + geom_point() + geom_smooth() + theme_bw()
+
+
+# For each destination, compute the total minutes of delay. For each flight, compute the proportion of the total delay for its destination.
+
+flights %>% 
+  group_by(dest) %>% 
+  summarise(prob_delay = arr_delay/sum(arr_delay, na.rm = TRUE)) %>% 
+  relocate(prob_delay)
+
+
+
+
+# Delays are typically temporally correlated: even once the problem that caused the initial delay has been resolved, later flights are delayed to allow earlier flights to leave. Using lag(), explore how the delay of a flight is related to the delay of the immediately preceding flight.
+
+
+
+# Look at each destination. Can you find flights that are suspiciously fast? (i.e. flights that represent a potential data entry error). Compute the air time of a flight relative to the shortest flight to that destination. Which flights were most delayed in the air?
+
+
+
+# Find all destinations that are flown by at least two carriers. Use that information to rank the carriers.
+
+
+
+# For each plane, count the number of flights before the first delay of greater than 1 hour.
+
+```
+
+### Mutating joins 
+
+Add variables by matching oberservations to a key. 
+Types: 
+* left
+* right 
+* inner 
+* outer 
+* full
+
+E.g.:
+```{r}
+flights %>%
+  select(year:day, hour,tailnum, carrier) %>% 
+  left_join(airlines, by = "carrier")
+```
+
+```{r, echo = FALSE, warning=FALSE, results=FALSE}
+#Compute the average delay by destination, then join on the airports data frame so you can show the spatial distribution of delays. Here’s an easy way to draw a map of the United States:
+# You might want to use the size or colour of the points to display the average delay for each airport.
+
+airports %>%
+  semi_join(flights, c("faa" = "dest")) %>%
+  ggplot(aes(lon, lat)) +
+    borders("state") +
+    geom_point() +
+    coord_quickmap()
+
+flights %>% 
+  group_by(dest) %>% 
+  summarise(delay = mean(arr_delay, na.rm = TRUE)) %>% 
+    left_join(airports, c("dest" = "faa")) %>% 
+    ggplot(aes(lon, lat)) +
+    borders("state") +
+    geom_point(aes(col = delay)) +
+    coord_quickmap() + theme_bw() + scale_color_viridis(direction = -1)
+  
+ 
+# Add the location of the origin and destination (i.e. the lat and lon) to flights.
+
+flights %>%
+  left_join(select(airports, faa, lat, lon), c("dest" = "faa")) %>% 
+  left_join(select(airports, faa, lat, lon), c("origin" = "faa"), suffix = c("_dest", "_origin")) 
+ 
+# Is there a relationship between the age of a plane and its delays?
+
+head(planes)
+
+flights %>% 
+  group_by(tailnum) %>% 
+  summarize(avg_delay = mean(arr_delay, na.rm = TRUE)) %>% 
+  left_join(select(planes, 1:2)) %>% 
+  ggplot(aes(2014-year, avg_delay)) + 
+  geom_point() + geom_smooth() + theme_bw() + labs(x = "Age of plane", y = "Average delay")
+
+ 
+# What weather conditions make it more likely to see a delay?
+
+
+
+# What happened on June 13 2013? Display the spatial pattern of delays, and then use Google to cross-reference with the weather.
+```
+
+# Data transformation
+
+* It is more costly to modify rows than columns in data frames. 
+* For data frames, each column is an object in memory. For matrices, you only have one object, making it more costly to alter. 
+* In a loop, it is better to alter a vector than to grow. 
 
